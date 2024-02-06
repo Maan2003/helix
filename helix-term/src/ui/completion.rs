@@ -25,7 +25,12 @@ use helix_lsp::{lsp, util, OffsetEncoding};
 impl menu::Item for CompletionItem {
     type Data = ();
     fn sort_text(&self, data: &Self::Data) -> Cow<str> {
-        self.filter_text(data)
+        self.item
+            .sort_text
+            .as_ref()
+            .unwrap_or(&self.item.label)
+            .as_str()
+            .into()
     }
 
     #[inline]
@@ -116,7 +121,12 @@ impl Completion {
         let preview_completion_insert = editor.config().preview_completion_insert;
         let replace_mode = editor.config().completion_replace;
         // Sort completion items according to their preselect status (given by the LSP server)
-        items.sort_by_key(|item| !item.item.preselect.unwrap_or(false));
+        items.sort_by_key(|item| {
+            (
+                !item.item.preselect.unwrap_or(false),
+                item.item.sort_text.clone(),
+            )
+        });
 
         // Then create the menu
         let menu = Menu::new(items, (), move |editor: &mut Editor, item, event| {

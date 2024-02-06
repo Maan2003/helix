@@ -99,16 +99,19 @@ impl<T: Item> Menu<T> {
     pub fn score(&mut self, pattern: &str, incremental: bool) {
         let mut matcher = MATCHER.lock();
         matcher.config = Config::DEFAULT;
+        matcher.config.prefer_prefix = true;
         let pattern = Atom::new(pattern, CaseMatching::Ignore, AtomKind::Fuzzy, false);
         let mut buf = Vec::new();
         if incremental {
             self.matches.retain_mut(|(index, score)| {
                 let option = &self.options[*index as usize];
                 let text = option.filter_text(&self.editor_data);
+                let sort_text = option.sort_text(&self.editor_data);
                 let new_score = pattern.score(Utf32Str::new(&text, &mut buf), &mut matcher);
                 match new_score {
                     Some(new_score) => {
-                        *score = new_score as u32;
+                        *score = new_score as u32
+                            + u32::from_str_radix(&sort_text, 16).map_or(0, |x| x ^ 0xFF_FF_FF_FF);
                         true
                     }
                     None => false,

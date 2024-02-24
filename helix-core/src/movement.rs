@@ -1,4 +1,7 @@
-use std::{cmp::Reverse, iter};
+use std::{
+    cmp::{Ordering, Reverse},
+    iter,
+};
 
 use ropey::iter::Chars;
 use tree_sitter::{Node, QueryCursor};
@@ -509,7 +512,8 @@ pub fn goto_treesitter_object(
     count: usize,
 ) -> Range {
     let get_range = move |range: Range| -> Option<Range> {
-        let byte_pos = slice.char_to_byte(range.cursor(slice));
+        let start = slice.char_to_byte(range.from());
+        let end = slice.char_to_byte(range.to());
 
         let cap_name = |t: TextObject| format!("{}.{}", object_name, t);
         let mut cursor = QueryCursor::new();
@@ -524,13 +528,20 @@ pub fn goto_treesitter_object(
             &mut cursor,
         )?;
 
+        let preorder = |s1: usize, e1: usize, s2: usize, e2: usize| {
+            s1.cmp(&s2).then_with(|| e1.cmp(&e2).reverse())
+        };
         let node = match dir {
             Direction::Forward => nodes
-                .filter(|n| n.start_byte() > byte_pos)
-                .min_by_key(|n| (n.start_byte(), Reverse(n.end_byte())))?,
+                .filter(|n| preorder(n.start_byte(), n.end_byte(), start, end) == Ordering::Greater)
+                .min_by(|a, b| {
+                    preorder(a.start_byte(), a.end_byte(), b.start_byte(), b.end_byte())
+                })?,
             Direction::Backward => nodes
-                .filter(|n| n.end_byte() < byte_pos)
-                .max_by_key(|n| (n.end_byte(), Reverse(n.start_byte())))?,
+                .filter(|n| preorder(n.start_byte(), n.end_byte(), start, end) == Ordering::Less)
+                .max_by(|a, b| {
+                    preorder(a.start_byte(), a.end_byte(), b.start_byte(), b.end_byte())
+                })?,
         };
 
         let len = slice.len_bytes();

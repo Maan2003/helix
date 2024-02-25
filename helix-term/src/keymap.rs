@@ -7,11 +7,12 @@ use arc_swap::{
     ArcSwap,
 };
 use helix_view::{document::Mode, info::Info, input::KeyEvent};
-use serde::Deserialize;
+use serde::{de, Deserialize};
 use std::{
     borrow::Cow,
     collections::{BTreeSet, HashMap},
     ops::{Deref, DerefMut},
+    str::FromStr,
     sync::Arc,
 };
 
@@ -32,11 +33,19 @@ impl<'de> Deserialize<'de> for KeyTrieNode {
     where
         D: serde::Deserializer<'de>,
     {
-        let map = HashMap::<KeyEvent, KeyTrie>::deserialize(deserializer)?;
-        let order = map.keys().copied().collect::<Vec<_>>(); // NOTE: map.keys() has arbitrary order
+        #[derive(Deserialize)]
+        struct SerdeRepr {
+            sticky: bool,
+            #[serde(flatten)]
+            map: HashMap<KeyEvent, KeyTrie>,
+        }
+
+        let repr = SerdeRepr::deserialize(deserializer)?;
+        let order = repr.map.keys().copied().collect::<Vec<_>>(); // NOTE: map.keys() has arbitrary order
         Ok(Self {
-            map,
+            map: repr.map,
             order,
+            is_sticky: repr.sticky,
             ..Default::default()
         })
     }
@@ -186,11 +195,19 @@ impl<'de> serde::de::Visitor<'de> for KeyTrieVisitor {
     {
         let mut mapping = HashMap::new();
         let mut order = Vec::new();
-        while let Some((key, value)) = map.next_entry::<KeyEvent, KeyTrie>()? {
-            mapping.insert(key, value);
-            order.push(key);
+        let mut sticky = false;
+        while let Some(key) = map.next_key::<String>()? {
+            if key == "sticky" {
+                sticky = map.next_value::<bool>()?;
+            } else {
+                let key = KeyEvent::from_str(&key).map_err(de::Error::custom)?;
+                mapping.insert(key, map.next_value::<KeyTrie>()?);
+                order.push(key);
+            }
         }
-        Ok(KeyTrie::Node(KeyTrieNode::new("", mapping, order)))
+        let mut key_trie_node = KeyTrieNode::new("", mapping, order);
+        key_trie_node.is_sticky = sticky;
+        Ok(KeyTrie::Node(key_trie_node))
     }
 }
 

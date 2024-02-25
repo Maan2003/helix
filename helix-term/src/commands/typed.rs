@@ -102,6 +102,70 @@ fn force_quit(
     Ok(())
 }
 
+fn goto_next_ts(
+    cx: &mut compositor::Context,
+    args: &[Cow<str>],
+    event: PromptEvent,
+) -> anyhow::Result<()> {
+    if event != PromptEvent::Validate {
+        return Ok(());
+    }
+    let object = args.first().context("expected arguement")?.to_string();
+    let motion = move |editor: &mut Editor| goto_ts_inner(editor, &object, Direction::Forward, 1);
+    cx.editor.apply_motion(motion);
+    Ok(())
+}
+
+fn goto_prev_ts(
+    cx: &mut compositor::Context,
+    args: &[Cow<str>],
+    event: PromptEvent,
+) -> anyhow::Result<()> {
+    if event != PromptEvent::Validate {
+        return Ok(());
+    }
+    let object = args.first().context("expected arguement")?.to_string();
+    let motion = move |editor: &mut Editor| goto_ts_inner(editor, &object, Direction::Backward, 1);
+    cx.editor.apply_motion(motion);
+    Ok(())
+}
+
+fn goto_ts_inner(editor: &mut Editor, object: &str, direction: Direction, count: usize) {
+    let (view, doc) = current!(editor);
+    if let Some((lang_config, syntax)) = doc.language_config().zip(doc.syntax()) {
+        let text = doc.text().slice(..);
+        let root = syntax.tree().root_node();
+
+        let selection = doc.selection(view.id).clone().transform(|range| {
+            let new_range = movement::goto_treesitter_object(
+                text,
+                range,
+                object,
+                direction,
+                root,
+                lang_config,
+                count,
+            );
+
+            if editor.mode == Mode::Select {
+                let head = if new_range.head < range.anchor {
+                    new_range.anchor
+                } else {
+                    new_range.head
+                };
+
+                Range::new(range.anchor, head)
+            } else {
+                new_range.with_direction(direction)
+            }
+        });
+
+        doc.set_selection(view.id, selection);
+    } else {
+        editor.set_status("Syntax-tree is not available in current buffer");
+    }
+}
+
 fn open(cx: &mut compositor::Context, args: &[Cow<str>], event: PromptEvent) -> anyhow::Result<()> {
     if event != PromptEvent::Validate {
         return Ok(());
@@ -2872,6 +2936,20 @@ pub const TYPABLE_COMMAND_LIST: &[TypableCommand] = &[
         doc: "Goto line number.",
         fun: goto_line_number,
         signature: CommandSignature::none(),
+    },
+    TypableCommand {
+        name: "goto-ts-next",
+        aliases: &[],
+        doc: "Goto next treesitter node.",
+        fun: goto_next_ts,
+        signature: CommandSignature::positional(&[completers::none]),
+    },
+    TypableCommand {
+        name: "goto-ts-prev",
+        aliases: &[],
+        doc: "Goto prev tree-sitter node.",
+        fun: goto_prev_ts,
+        signature: CommandSignature::positional(&[completers::none]),
     },
     TypableCommand {
         name: "set-language",
